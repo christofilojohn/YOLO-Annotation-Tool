@@ -291,9 +291,12 @@ class AnnotationCanvas(QLabel):
             if self.base_image:
                 self.update_scaled_image()
 class AssistatedAnnotator(QMainWindow):
-    def __init__(self, model_path, confidence=0.4):
+    def __init__(self, model_path=None, confidence=0.4):
         super().__init__()
-        self.model = YOLO(model_path)
+        self.model = None
+        self.model_path = model_path
+        if model_path:
+            self.model = YOLO(model_path)
         self.confidence = confidence
         self.current_image = None
         self.current_image_path = None
@@ -379,6 +382,16 @@ class AssistatedAnnotator(QMainWindow):
         self.load_dir_btn = QPushButton("Load Dataset Directory")  # Updated text
         self.load_dir_btn.clicked.connect(self.load_directory)
         sidebar_layout.addWidget(self.load_dir_btn)
+
+        # Model selection button
+        self.load_model_btn = QPushButton("Load YOLO Model")
+        self.load_model_btn.clicked.connect(self.load_model)
+        sidebar_layout.addWidget(self.load_model_btn)
+
+        self.model_label = QLabel("Model: None loaded")
+        self.model_label.setWordWrap(True)
+        self.model_label.setStyleSheet("color: gray; font-size: 10px;")
+        sidebar_layout.addWidget(self.model_label)
 
         self.next_btn = QPushButton("Next Image")
         self.next_btn.clicked.connect(self.next_image)
@@ -556,6 +569,30 @@ class AssistatedAnnotator(QMainWindow):
         sidebar_layout.addWidget(progress_widget)
 
         sidebar_layout.addStretch()
+
+    def load_model(self):
+        """Open file dialog to select a YOLO model file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select YOLO Model",
+            "",
+            "PyTorch Models (*.pt);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                self.model = YOLO(file_path)
+                self.model_path = file_path
+                # Display just the filename, not the full path
+                model_name = Path(file_path).name
+                self.model_label.setText(f"Model: {model_name}")
+                self.model_label.setStyleSheet("color: green; font-size: 10px;")
+                QMessageBox.information(self, "Success", f"Model loaded: {model_name}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load model: {str(e)}")
+                self.model = None
+                self.model_label.setText("Model: None loaded")
+                self.model_label.setStyleSheet("color: red; font-size: 10px;")
 
     def split_changed(self):
         """Handle changing dataset split"""
@@ -917,6 +954,10 @@ class AssistatedAnnotator(QMainWindow):
                         self.canvas.boxes.append(QRect(x, y, w, h))
                         self.canvas.labels.append("good_fin" if class_id == DATASET_GOOD_FIN_CLASS_ID else "bad_fin")
         else:
+            if not self.model:
+                QMessageBox.warning(self, "No Model", "Please load a YOLO model first to use prediction mode.")
+                self.display_image()
+                return
             # Get predictions from YOLO model
             results = self.model.predict(self.current_image_path, conf=self.confidence)
             if len(results) > 0:
@@ -933,28 +974,6 @@ class AssistatedAnnotator(QMainWindow):
                     )
 
         self.display_image()
-
-
-    # def display_image(self):
-    #     if self.current_image is None:
-    #         return
-    #
-    #     height, width = self.current_image.shape[:2]
-    #     bytes_per_line = 3 * width
-    #     qt_image = QImage(self.current_image.data, width, height,
-    #                       bytes_per_line, QImage.Format.Format_RGB888)
-    #
-    #     # Scale image to fit canvas while maintaining aspect ratio
-    #     scaled_pixmap = QPixmap.fromImage(qt_image).scaled(
-    #         self.canvas.size(),
-    #         Qt.AspectRatioMode.KeepAspectRatio,
-    #         Qt.TransformationMode.SmoothTransformation
-    #     )
-    #
-    #     self.canvas.setPixmap(scaled_pixmap)
-    #
-    #     # Update scale factor for box drawing
-    #     self.canvas.scale_factor = scaled_pixmap.width() / width
 
     def add_box(self, rect):
         self.canvas.boxes.append(rect)
@@ -1115,12 +1134,7 @@ class AssistatedAnnotator(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-
-    # Initialize the annotator with your pre-trained model
-    annotator = AssistatedAnnotator(
-        model_path='best_tail.pt',
-        confidence=0.4
-    )
+    annotator = AssistatedAnnotator(confidence=0.4)
 
     annotator.show()
     sys.exit(app.exec())
